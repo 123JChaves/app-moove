@@ -1,0 +1,3 @@
+#Exclui do repositório as
+#variáveis de ambiente
+.env

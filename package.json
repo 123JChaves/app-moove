@@ -1,0 +1,33 @@
+{
+  "name": "jcha-project-root",
+  "version": "1.0.0",
+  "description": "Orquestrador centralizado do ecossistema WhatsApp Bot e React Native App",
+  "main": "index.js",
+  "scripts": {
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "docker:infra": "docker compose up --build",
+    "docker:front": "docker compose up frontend",
+    "docker:front:down": "docker compose stop frontend",
+    "docker:front:clean": "docker compose rm -f -s frontend",
+    "docker:logs": "docker compose logs -f backend db nginx",
+    "docker:clean": "docker system prune -a --volumes",
+    "local:backend": "cd whatsappBot && npm run dev",
+    "local:frontend": "cd jcha_app && npm start",
+    "local:install": "cd whatsappBot && npm install && cd .. && cd jcha_app && npm install",
+    "test:backend": "cd whatsappBot && npm run test",
+    "test:backend:watch": "cd whatsappBot && npm run test:watch",
+    "test:e2e": "cd jcha_app && maestro test .maestro/login.test.yaml"
+  },
+  "keywords": [
+    "docker",
+    "expo",
+    "react-native",
+    "baileys",
+    "whatsapp-bot",
+    "typeorm"
+  ],
+  "author": "",
+  "license": "ISC"
+}

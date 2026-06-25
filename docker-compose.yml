@@ -1,0 +1,95 @@
+services:
+
+  # 🗄️ CONTAINER 1: Banco de Dados (MySQL)
+  db:
+    image: mysql:8.0
+    container_name: mysql_db_whatsapp
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 🤖 CONTAINER 2: Back-end (Sua API Bot WhatsApp)
+  backend:
+    build:
+      context: ./whatsappBot
+      dockerfile: Dockerfile.backend
+    container_name: jcha_backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8085:8085" # 🌟 ADICIONADO: Expõe a porta para o Windows, permitindo o túnel do Ngrok funcionar
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 8085
+    volumes:
+      - ./whatsappBot:/app
+      - /app/node_modules
+      - backend_uploads:/app/dist/public
+    networks:
+      - app_network
+
+  # 🌐 CONTAINER 3: Nginx Proxy Reverso
+  nginx:
+    image: nginx:alpine
+    container_name: jcha_nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${NGINX_HTTP_PORT}:80"
+      - "${NGINX_HTTPS_PORT}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    networks:
+      - app_network
+
+  # 📱 CONTAINER 4: Front-end (React Native / Expo)
+  frontend:
+    build:
+      context: ./jcha_app
+      dockerfile: Dockerfile.frontend
+    container_name: jcha_frontend
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./jcha_app:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    environment:
+      - REACT_NATIVE_PACKAGER_HOSTNAME=${REACT_NATIVE_PACKAGER_HOSTNAME}
+    stdin_open: true
+    tty: true
+    networks:
+      - app_network
+    profiles:
+      - front
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  db_data:
+  backend_uploads:
