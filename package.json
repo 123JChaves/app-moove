@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Orquestrador centralizado do ecossistema WhatsApp Bot e React Native App",
   "main": "index.js",
-    "scripts": {
+  "scripts": {
     "docker:build": "docker compose build",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
@@ -20,7 +20,8 @@
     "local:frontend": "cd jcha_app && npm start",
     "local:install": "cd whatsappBot && npm install && cd .. && cd jcha_app && npm install",
     "test:backend": "cd whatsappBot && npm run test",
-    "test:backend:watch": "cd whatsappBot && npm run test:watch"
+    "test:backend:watch": "cd whatsappBot && npm run test:watch",
+    "prepare": "husky"
   },
   "keywords": [
     "docker",
