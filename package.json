@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Orquestrador centralizado do ecossistema WhatsApp Bot e React Native App",
   "main": "index.js",
-  "scripts": {
+    "scripts": {
     "docker:build": "docker compose build",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
@@ -13,12 +13,14 @@
     "docker:front:clean": "docker compose rm -f -s frontend",
     "docker:logs": "docker compose logs -f backend db nginx",
     "docker:clean": "docker system prune -a --volumes",
+    "docker:test:cadastro": "docker compose --profile front exec frontend npm run test:cadastro:e2e",
+    "docker:test:login": "docker compose --profile front exec frontend npm run test:login:e2e",
+    "docker:test:jornada": "docker compose --profile front exec frontend npm run test:jornada:e2e",
     "local:backend": "cd whatsappBot && npm run dev",
     "local:frontend": "cd jcha_app && npm start",
     "local:install": "cd whatsappBot && npm install && cd .. && cd jcha_app && npm install",
     "test:backend": "cd whatsappBot && npm run test",
-    "test:backend:watch": "cd whatsappBot && npm run test:watch",
-    "test:e2e": "cd jcha_app && maestro test .maestro/login.test.yaml"
+    "test:backend:watch": "cd whatsappBot && npm run test:watch"
   },
   "keywords": [
     "docker",
@@ -29,5 +31,8 @@
     "typeorm"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
 }

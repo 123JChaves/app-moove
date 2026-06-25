@@ -1,0 +1,8 @@
+#!/bin/sh
+echo "🧪 Executando testes automatizados E2E dentro do container Docker antes do push..."
+
+# Executa as duas suítes direto desativando o TTY (-T). Se qualquer uma falhar, o push aborta.
+docker compose --profile front exec -T frontend npm run test:login:e2e || exit 1
+docker compose --profile front exec -T frontend npm run test:cadastro:e2e || exit 1
+
+echo "✅ Todos os testes passaram! Concluindo envio..."

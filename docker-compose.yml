@@ -31,7 +31,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8085:8085" # 🌟 ADICIONADO: Expõe a porta para o Windows, permitindo o túnel do Ngrok funcionar
+      - "8085:8085"
     environment:
       DB_HOST: db
       DB_PORT: 3306
@@ -81,6 +81,21 @@ services:
       - REACT_NATIVE_PACKAGER_HOSTNAME=${REACT_NATIVE_PACKAGER_HOSTNAME}
     stdin_open: true
     tty: true
+    networks:
+      - app_network
+    profiles:
+      - front
+
+  # 🧪 CONTAINER 5: Servidor Appium (Unificado na Infraestrutura)
+  appium:
+    image: appium/appium:latest
+    container_name: jcha_appium
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "4723:4723"
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
     networks:
       - app_network
     profiles:

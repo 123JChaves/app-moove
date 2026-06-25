@@ -1,0 +1,9 @@
+#!/bin/sh
+# Lê a mensagem diretamente do parâmetro temporário enviado pelo Git
+commit_msg=$(cat "$1")
+regex="^(feat|fix|docs|style|refactor|test|chore|perf|ci)(\(.+\))?: .+"
+
+if ! echo "$commit_msg" | grep -Eq "$regex"; then
+    echo "❌ Erro: Mensagem de commit inválida!"
+    exit 1
+fi
