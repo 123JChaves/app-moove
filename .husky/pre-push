@@ -1,8 +1,11 @@
 #!/bin/sh
-echo "🧪 Executando testes automatizados E2E dentro do container Docker antes do push..."
+echo "🧪 Executando testes automatizados E2E locais antes do push..."
 
-# Usa 'run --rm' para subir o container temporariamente, rodar o teste e fechar sozinho
-docker compose --profile front run --rm frontend npm run test:login:e2e || exit 1
-docker compose --profile front run --rm frontend npm run test:cadastro:e2e || exit 1
+# Muda para a pasta do frontend para o Node encontrar as dependências e o Babel local
+cd jcha_app
 
-echo "✅ Todos os testes passaram! Concluindo envio..."
+# Executa os scripts originais do jeito exato que eles funcionavam
+npm run test:login:e2e || exit 1
+npm run test:cadastro:e2e || exit 1
+
+echo "✅ Todos os testes passaram localmente! Concluindo envio..."
