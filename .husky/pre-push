@@ -1,11 +1,7 @@
 #!/bin/sh
 echo "🧪 Executando testes automatizados E2E locais antes do push..."
 
-# Muda para a pasta do frontend para o Node encontrar as dependências e o Babel local
-cd jcha_app
-
-# Executa os scripts originais do jeito exato que eles funcionavam
-npm run test:login:e2e || exit 1
-npm run test:cadastro:e2e || exit 1
+npm run local:test:login || exit 1
+npm run local:test:cadastro || exit 1
 
 echo "✅ Todos os testes passaram localmente! Concluindo envio..."

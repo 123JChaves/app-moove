@@ -1,3 +1,6 @@
 #Exclui do repositório as
 #variáveis de ambiente
 .env
+
+#Exclui as bibliotecas do commit
+node_modules

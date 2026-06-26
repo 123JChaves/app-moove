@@ -21,7 +21,10 @@
     "local:install": "cd whatsappBot && npm install && cd .. && cd jcha_app && npm install",
     "test:backend": "cd whatsappBot && npm run test",
     "test:backend:watch": "cd whatsappBot && npm run test:watch",
-    "prepare": "husky"
+    "prepare": "husky && husky install",
+    "local:test:login": "npm run test:login:e2e --prefix jcha_app",
+    "local:test:cadastro": "npm run test:cadastro:e2e --prefix jcha_app",
+    "local:test:jornada": "npm run test:jornada:e2e --prefix jcha_app"
   },
   "keywords": [
     "docker",
@@ -35,6 +38,6 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^26.0.1",
-    "husky": "^9.1.7"
+    "husky": "^8.0.0"
   }
 }
