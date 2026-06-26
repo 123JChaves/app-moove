@@ -86,21 +86,6 @@ services:
     profiles:
       - front
 
-  # 🧪 CONTAINER 5: Servidor Appium (Unificado na Infraestrutura)
-  appium:
-    image: appium/appium:latest
-    container_name: jcha_appium
-    restart: unless-stopped
-    privileged: true
-    ports:
-      - "4723:4723"
-    volumes:
-      - /dev/bus/usb:/dev/bus/usb
-    networks:
-      - app_network
-    profiles:
-      - front
-
 networks:
   app_network:
     driver: bridge
