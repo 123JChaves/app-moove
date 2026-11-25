@@ -1,0 +1,249 @@
+﻿Issue ID,Parent ID,Issue Type,Summary,Description,Priority,Labels,Labels,Labels,Story Points,Fix Version,Status
+SCRUM-2,,Epic,Cadastros de parceiros,"Cadastro e manutenção de motoristas, passageiros, empresas e endereços.",Highest,cadastros,,,,v0.1.0,Done
+SCRUM-3,,Epic,Fila de joinhas e escala,Formação automática da fila pelo WhatsApp e geração da escala diária (core).,Highest,escala,,,,v1.0.0,Done
+SCRUM-4,,Epic,Rotas e atribuições,"Rotas da tarde/madrugada, ordem de embarque, atribuição de motoristas e solicitações de corrida.",Highest,rotas,,,,v1.0.0,Done
+SCRUM-5,,Epic,Bot WhatsApp,"Comandos, notificações e integração Baileys.",Highest,bot,,,,v0.5.0,Done
+SCRUM-6,,Epic,App mobile de gestão,Telas Expo/React Native para o administrador.,Highest,app,,,,v1.0.0,Done
+SCRUM-7,,Epic,Segurança e acesso,"Login JWT, RBAC, proteção de borda.",Highest,seguranca,,,,v1.0.1,Done
+SCRUM-8,,Epic,"Infra, performance e observabilidade","Docker, Nginx, Redis, CI/CD, logs, métricas e resiliência.",Highest,infra,,,,v1.1.0,In Progress
+SCRUM-9,,Epic,Documentação e gestão,"C4, ADRs, DDD, OpenAPI, SLOs, runbook, Cynefin, PM Canvas.",Highest,docs,,,,v1.1.0,In Progress
+SCRUM-12,SCRUM-2,Story,Cadastrar motorista,"Como administrador, quero cadastrar motoristas com nome e WhatsApp, para que possam entrar na fila do dia.
+
+Critérios de aceite:
+- Dado nome e telefone válidos, Quando salvo, Então o motorista é criado ativo
+- Dado um LID já usado, Quando salvo, Então recebo 400 de duplicidade
+- O nome é salvo sanitizado",Highest,cadastros,backend,,3,v0.1.0,Done
+SCRUM-13,SCRUM-2,Story,Cadastrar empresa com logo,"Como administrador, quero cadastrar empresas com CNPJ e logo, para identificar os clientes atendidos nas rotas.
+
+Critérios de aceite:
+- Dado CNPJ inválido, Então recebo 400
+- Dado CNPJ duplicado, Então recebo 400
+- A logo é enviada via multipart e servida em /imagens",Highest,cadastros,backend,,5,v0.1.0,Done
+SCRUM-14,SCRUM-2,Story,Cadastrar passageiro com endereço,"Como administrador, quero cadastrar passageiros vinculados a uma empresa e um endereço, para incluí-los em rotas.
+
+Critérios de aceite:
+- Endereço/bairro inexistente é criado automaticamente (buscar ou criar)
+- Telefone é normalizado para dígitos
+- Telefone duplicado retorna 400",Highest,cadastros,backend,,5,v0.1.0,Done
+SCRUM-15,SCRUM-2,Story,Ativar/inativar motorista,"Como administrador, quero inativar um motorista, para que ele não entre na fila sem ser excluído.
+
+Critérios de aceite:
+- PATCH /motoristas/:id/status altera o campo ativo
+- Motorista inativo não é aceito na fila
+- Comandos @ativar/@inativar no grupo têm o mesmo efeito",High,cadastros,,,2,v1.0.0,Done
+SCRUM-16,SCRUM-5,Story,Entrar na fila com joinha,"Como motorista, quero reagir com 👍 à mensagem do dia, para garantir minha posição na fila.
+
+Critérios de aceite:
+- Dado a mensagem do dia, Quando reajo com 👍, Então sou inserido com a hora da reação
+- Reagir duas vezes não duplica
+- Remover a reação remove da fila",Highest,escala,bot,,8,v0.5.0,Done
+SCRUM-17,SCRUM-3,Story,Gerar escala automática às 20:25,"Como administrador, quero que a escala seja gerada automaticamente, para não montar a lista à mão.
+
+Critérios de aceite:
+- Às 20:25 o cron gera a escala da lista do dia
+- Categorias plantão, rota, apoio e backup seguem a meta do dia
+- A escala é publicada no grupo
+- Evento moove.escala.gerada registrado",Highest,escala,backend,,13,v1.0.0,Done
+SCRUM-18,SCRUM-3,Story,Configurar dia livre (feriado),"Como administrador, quero marcar um dia como livre, para que a escala use a regra reduzida.
+
+Critérios de aceite:
+- POST /whatsapp/configurar-dia com tipo DIA_LIVRE
+- Em dia livre só há plantão e o restante fica LIVRE
+- O grupo recebe aviso",High,escala,,,3,v1.0.0,Done
+SCRUM-19,SCRUM-3,Story,Penalizar motorista,"Como administrador, quero penalizar um motorista, para que ele vá ao fim da fila.
+
+Critérios de aceite:
+- Penalizados são ordenados depois dos demais
+- Banimento do dia impede a entrada na fila",High,escala,,,5,v1.0.1,Done
+SCRUM-20,SCRUM-3,Story,Ajustar a fila manualmente pelo app,"Como administrador, quero inserir, mover e remover motoristas da fila, para corrigir situações excepcionais.
+
+Critérios de aceite:
+- Setas ▲▼ reordenam
+- Botão + insere em posição
+- Lixeira remove
+- A escala é recalculada",Highest,escala,app,,8,v1.0.1,Done
+SCRUM-21,SCRUM-3,Story,Fixar motorista no apoio,"Como administrador, quero fixar um motorista no apoio, para que o recálculo automático não o mova.
+
+Critérios de aceite:
+- isApoioManual=true mantém a posição
+- Desfixar reintegra à fila e recalcula",Medium,escala,,,5,v1.0.1,Done
+SCRUM-22,SCRUM-4,Story,Cadastrar rota com ordem de passageiros,"Como administrador, quero montar rotas com passageiros em ordem, para orientar o embarque.
+
+Critérios de aceite:
+- A ordem do array define ordem_na_rota 1..N
+- Rota pertence a um turno (tarde/madrugada)
+- Editar a rota reordena os passageiros",Highest,rotas,backend,,8,v1.0.0,Done
+SCRUM-23,SCRUM-4,Story,Ver rotas do turno com motorista,"Como administrador, quero ver as rotas da tarde e da madrugada com o motorista designado, para acompanhar a operação.
+
+Critérios de aceite:
+- GET /whatsapp/rotas-tarde e /rotas-madrugada
+- Madrugada usa a regra X+2
+- Rota sem motorista aparece vazia (null)",Highest,rotas,app,,8,v1.0.0,Done
+SCRUM-24,SCRUM-4,Story,Solicitar corrida pelo WhatsApp,"Como passageiro, quero solicitar minha corrida de ida/volta pelo grupo, para confirmar que vou usar o transporte.
+
+Critérios de aceite:
+- @solicitacao registra IDA ou VOLTA na data
+- O app mostra check verde nos passageiros confirmados
+- Solicitação duplicada não é registrada",High,rotas,bot,,8,v1.0.1,Done
+SCRUM-25,SCRUM-4,Story,Alocar motorista manualmente em uma rota,"Como administrador, quero trocar ou liberar o motorista de uma rota, para cobrir faltas.
+
+Critérios de aceite:
+- Motorista 'só plantão' é recusado com 400
+- whatsappId vazio libera a vaga
+- A alocação manual não é sobrescrita pelo robô",Highest,rotas,,,5,v1.0.1,Done
+SCRUM-26,SCRUM-6,Story,Login no app,"Como administrador, quero entrar no app com e-mail e senha, para acessar as funções de gestão.
+
+Critérios de aceite:
+- Credenciais válidas retornam JWT
+- Credenciais inválidas retornam 401
+- O token é enviado nas requisições",Highest,app,seguranca,,3,v0.1.0,Done
+SCRUM-27,SCRUM-7,Story,Controle de acesso por papel,"Como administrador, quero que usuários comuns não excluam cadastros, para proteger os dados.
+
+Critérios de aceite:
+- Rotas de escrita exigem permissão do papel
+- Sem permissão retorna 403
+- Papéis/permissões semeados no boot",Highest,seguranca,backend,,5,v1.0.1,Done
+SCRUM-28,SCRUM-7,Story,Bloquear acesso direto à API pelo navegador,"Como responsável técnico, quero bloquear a navegação direta à API, para não expor dados a curiosos.
+
+Critérios de aceite:
+- Navegação direta externa retorna 403
+- App e localhost continuam funcionando",High,seguranca,infra,,3,v1.0.1,Done
+SCRUM-29,SCRUM-8,Story,Orquestrar serviços com Docker Compose,"Como desenvolvedor, quero subir todo o ambiente com um comando, para padronizar desenvolvimento e produção.
+
+Critérios de aceite:
+- docker compose up sobe db, redis, backend e nginx
+- Banco/cache/API sem portas públicas
+- Healthchecks configurados",Highest,infra,,,5,v1.0.1,Done
+SCRUM-30,SCRUM-8,Story,Cache das listagens com Redis,"Como administrador, quero que as telas de rotas e empresas abram rápido, para agilizar a operação no pico.
+
+Critérios de aceite:
+- Dado cache vazio, Quando listo rotas, Então busca no MySQL e grava no Redis com TTL
+- Na 2ª chamada vem do cache
+- Ao editar rota/passageiro/empresa o cache é invalidado
+- Sem Redis a API responde pelo banco",Highest,infra,backend,redis,8,v1.1.0,Done
+SCRUM-31,SCRUM-8,Story,Publicar eventos de domínio no Redis Pub/Sub,"Como desenvolvedor, quero publicar eventos quando cadastros mudam, para desacoplar efeitos colaterais.
+
+Critérios de aceite:
+- Alterações publicam em moove.*.alterado
+- Assinantes invalidam o cache em todas as instâncias
+- Logs mostram publicação e recebimento",Highest,infra,backend,redis,5,v1.1.0,Done
+SCRUM-32,SCRUM-8,Story,Corrigir configuração do Nginx,"Como responsável técnico, quero um nginx.conf válido com TLS, rate limit e correlation ID, para ter uma borda segura.
+
+Critérios de aceite:
+- nginx -t sem erros
+- HTTP e HTTPS funcionando
+- 429 acima de 20 r/s por IP
+- X-Request-Id propagado",Highest,infra,,,3,v1.1.0,Done
+SCRUM-33,SCRUM-8,Story,Logs estruturados e métricas,"Como responsável técnico, quero logs JSON e métricas Prometheus, para diagnosticar problemas rapidamente.
+
+Critérios de aceite:
+- Toda requisição gera log com idRequisicao, status e duração
+- GET /metrics expõe contadores e histograma
+- Erros retornam idRequisicao",Highest,infra,observabilidade,,5,v1.1.0,Done
+SCRUM-34,SCRUM-8,Story,Health checks,"Como operador, quero endpoints de saúde, para monitorar e automatizar deploy.
+
+Critérios de aceite:
+- /health responde 200 se o processo vive
+- /health/ready informa MySQL, Redis e WhatsApp
+- MySQL fora → 503",Highest,infra,observabilidade,,2,v1.1.0,Done
+SCRUM-35,SCRUM-8,Story,Resiliência a falhas de dependências,"Como operador, quero que falhas transitórias não derrubem o sistema, para manter a disponibilidade.
+
+Critérios de aceite:
+- Retry com backoff ao conectar no MySQL
+- Timeout nas chamadas ao Redis
+- Circuit breaker disponível
+- Encerramento gracioso em SIGTERM",High,infra,resiliencia,,5,v1.1.0,Done
+SCRUM-36,SCRUM-8,Story,Pipeline CI/CD,"Como equipe, quero build, testes e deploy automatizados, para entregar com segurança.
+
+Critérios de aceite:
+- PR roda typecheck, testes e build
+- Imagem versionada pelo SHA
+- Deploy na main exige aprovação
+- Rollback automático se o health falhar",Highest,infra,cicd,,8,v1.1.0,Done
+SCRUM-37,SCRUM-9,Story,Documentação arquitetural,"Como avaliador/novo membro, quero C4, ADRs e Quality Scenarios, para entender o sistema e suas decisões.
+
+Critérios de aceite:
+- C4 contexto e containers
+- ADRs das decisões principais
+- Quality scenarios com medidas",Highest,docs,,,5,v1.1.0,Done
+SCRUM-38,SCRUM-9,Story,DDD: context map e modelo de domínio,"Como equipe, quero mapear subdomínios e bounded contexts, para orientar a evolução do monólito modular.
+
+Critérios de aceite:
+- Context map com padrões de relacionamento
+- Entities, VOs e aggregates do contexto Escala",Highest,docs,ddd,,3,v1.1.0,Done
+SCRUM-39,SCRUM-9,Story,Contrato OpenAPI,"Como dev do app, quero o contrato OpenAPI, para integrar sem ler o código do back-end.
+
+Critérios de aceite:
+- openapi.yaml válido
+- Abre no Swagger UI",Highest,docs,api,,3,v1.1.0,Done
+SCRUM-40,SCRUM-9,Story,"SLOs, observabilidade e runbook","Como operador, quero SLOs e um runbook, para saber o que medir e como agir em incidentes.
+
+Critérios de aceite:
+- SLOs com SLI e error budget
+- Runbook cobre API, MySQL, Redis, WhatsApp, escala e rollback",Highest,docs,operacao,,3,v1.1.0,Done
+SCRUM-41,SCRUM-9,Story,"Gestão: Cynefin, PM Canvas e Jira","Como gerente de projeto, quero documentar a abordagem e o plano, para conduzir o ciclo de vida.
+
+Critérios de aceite:
+- Cynefin com justificativa
+- PM Canvas completo
+- Backlog importável no Jira",Highest,docs,gestao,,3,v1.1.0,Done
+SCRUM-42,SCRUM-7,Task,Exigir JWT nas rotas /whatsapp/*,"Débito técnico: hoje as rotas /whatsapp/* dependem só do Nginx.
+
+Critérios de aceite:
+- Todas as rotas /whatsapp/* com autenticar + USUARIO_GERENCIAR_ESCALA
+- App envia o token",Highest,seguranca,debito,,3,v1.2.0,To Do
+SCRUM-43,SCRUM-4,Bug,Rota POST /whatsapp/escala/rota-manual duplicada,"A segunda definição nunca é executada pelo Express.
+
+Critérios de aceite:
+- Apenas uma definição (versão upsert)
+- Teste cobrindo liberar e alocar vaga",High,rotas,debito,,2,v1.2.0,To Do
+SCRUM-44,SCRUM-8,Task,Desligar synchronize do TypeORM em produção,"Evitar alteração automática de esquema.
+
+Critérios de aceite:
+- synchronize=false fora de dev
+- Deploy roda migration:run",Highest,infra,debito,,2,v1.2.0,To Do
+SCRUM-45,SCRUM-9,Task,"Encapsular Value Objects (CPF, CNPJ, Telefone, LID)","Centralizar validações em objetos imutáveis.
+
+Critérios de aceite:
+- Classes VO com validação no construtor
+- Services usam os VOs",Medium,ddd,debito,,5,v1.2.0,To Do
+SCRUM-46,SCRUM-9,Task,Padronizar recursos REST em /v2,"Nomes no plural e verbos HTTP consistentes.
+
+Critérios de aceite:
+- /v2 publicado em paralelo
+- OpenAPI atualizado",Medium,api,debito,,5,Backlog,To Do
+SCRUM-47,SCRUM-8,Task,Circuit breaker no envio de mensagens do WhatsApp,"Proteger o app quando o WhatsApp estiver instável.
+
+Critérios de aceite:
+- enviarMensagemExterna envolvido pelo CircuitBreaker
+- App recebe 503 rápido quando aberto",High,resiliencia,,,3,v1.2.0,To Do
+SCRUM-48,SCRUM-8,Task,Migrar console.log legado para logger estruturado,"Padronizar logs do bot e da escala.
+
+Critérios de aceite:
+- Sem console.log em bot/ e service/whatsapp/
+- Logs com modulo",High,observabilidade,debito,,3,v1.2.0,To Do
+SCRUM-49,SCRUM-3,Task,Extrair lógica das rotas /whatsapp para services,"Melhorar a testabilidade da escala.
+
+Critérios de aceite:
+- RotasWhatsApp só chama controllers
+- Testes unitários das regras de categorização",High,escala,debito,,8,v1.2.0,To Do
+SCRUM-50,SCRUM-8,Story,Stack Prometheus + Grafana + Loki,"Como operador, quero dashboards e alertas, para acompanhar os SLOs.
+
+Critérios de aceite:
+- docker-compose.observabilidade.yml
+- Dashboards RED e de dependências
+- Alertas dos SLOs",High,observabilidade,,,8,v1.2.0,To Do
+SCRUM-52,SCRUM-8,Story,Microsserviço de auditoria de eventos,"Como administrador, quero consultar o histórico de escalas geradas e de alterações em rotas, motoristas e empresas, para resolver contestações da operação.
+
+Critérios de aceite:
+- Dado um evento moove.* publicado, Então ele é gravado no banco próprio do serviço (idempotente pelo id)
+- GET /auditoria/eventos filtra por tipo e período, paginado (máx. 100)
+- Rotas de consulta exigem JWT do /login
+- Se o banco da auditoria cair, os eventos vão para a DLQ e são reprocessados
+- Deploy, banco, imagem e pipeline independentes do monólito
+- Se o serviço cair, o monólito segue funcionando",Highest,microsservico,redis,infra,13,v1.1.0,Done
+SCRUM-51,SCRUM-5,Story,Notificar motorista no privado quando a escala sair,"Como motorista, quero receber minha categoria e rota no privado, para não procurar no grupo.
+
+Critérios de aceite:
+- Consumidor do evento moove.escala.gerada envia mensagem individual
+- Migrar os canais para Redis Streams com consumer groups (entrega garantida também para o microsserviço de auditoria)",Medium,bot,redis,,8,Backlog,To Do

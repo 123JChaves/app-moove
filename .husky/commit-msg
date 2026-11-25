@@ -1,2 +1,2 @@
 #!/bin/sh
-node validar-commit.js "$1"
+node executar-testes.js

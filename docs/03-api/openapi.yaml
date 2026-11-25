@@ -1,0 +1,905 @@
+openapi: 3.0.3
+info:
+  title: Moove API
+  version: 1.1.0
+  description: |
+    API REST do Moove: cadastros, rotas, escala de motoristas e integração com o bot do WhatsApp.
+
+    **Autenticação:** `POST /login` devolve um JWT. Envie-o em `Authorization: Bearer <token>`.
+    Permissões (RBAC) por papel (ADMIN/USER) conforme `utils/dicionario-rbac/DicionarioRbac.ts`.
+
+    **Correlation ID:** envie `X-Request-Id` (opcional). Ele é devolvido no header e no corpo dos erros.
+
+    **Cache:** as listagens de rotas, empresas e motoristas são servidas pelo Redis (cache-aside, TTL configurável).
+  contact:
+    name: Equipe Moove
+servers:
+  - url: https://localhost
+    description: Via Nginx (Docker)
+  - url: http://localhost:8085
+    description: Back-end direto (desenvolvimento local)
+
+tags:
+  - name: Saúde
+    description: Health checks e métricas
+  - name: Autenticação
+  - name: Rotas
+    description: Rotas de transporte (tarde = ida, madrugada = volta). Cacheadas no Redis.
+  - name: Empresas
+  - name: Motoristas
+  - name: Passageiros
+  - name: Usuários
+  - name: Escala (WhatsApp)
+    description: Fila de joinhas, geração e ajustes da escala. Exigem o bot inicializado (senão 503).
+  - name: Atribuição
+  - name: Endereçamento
+
+paths:
+  # ------------------------------------------------------------------ SAÚDE
+  /health:
+    get:
+      tags: [Saúde]
+      summary: Liveness (processo vivo)
+      security: []
+      responses:
+        "200":
+          description: Processo ativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: UP }
+                  uptimeSegundos: { type: integer, example: 3600 }
+  /health/ready:
+    get:
+      tags: [Saúde]
+      summary: Readiness (dependências)
+      description: MySQL é crítico (503 se fora). Redis e WhatsApp, se fora, deixam o status DEGRADED.
+      security: []
+      responses:
+        "200":
+          description: Pronto (UP ou DEGRADED)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Saude" }
+        "503":
+          description: MySQL indisponível
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Saude" }
+  /metrics:
+    get:
+      tags: [Saúde]
+      summary: Métricas no formato Prometheus
+      security: []
+      responses:
+        "200":
+          description: Texto Prometheus
+          content:
+            text/plain:
+              example: |
+                moove_http_requisicoes_total{metodo="GET",rota="/rotas",status="2xx"} 42
+                moove_cache_total{resultado="hit"} 35
+
+  # ------------------------------------------------------------------ AUTENTICAÇÃO
+  /login:
+    post:
+      tags: [Autenticação]
+      summary: Autentica um usuário e devolve o JWT
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, senha]
+              properties:
+                email: { type: string, format: email }
+                senha: { type: string, format: password }
+      responses:
+        "200":
+          description: Autenticado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  usuario: { $ref: "#/components/schemas/Usuario" }
+        "400": { $ref: "#/components/responses/RequisicaoInvalida" }
+        "401": { $ref: "#/components/responses/NaoAutorizado" }
+
+  # ------------------------------------------------------------------ ROTAS
+  /rotas:
+    get:
+      tags: [Rotas]
+      summary: Lista todas as rotas (cache-aside, chave moove:rotas:todas)
+      responses:
+        "200":
+          description: Lista de rotas ordenadas numericamente
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Rota" } }
+        "401": { $ref: "#/components/responses/NaoAutorizado" }
+        "403": { $ref: "#/components/responses/Proibido" }
+  /rotas/turno/{tipo}:
+    get:
+      tags: [Rotas]
+      summary: Lista rotas por turno (cache-aside)
+      parameters:
+        - in: path
+          name: tipo
+          required: true
+          schema: { $ref: "#/components/schemas/TurnoRota" }
+      responses:
+        "200":
+          description: Rotas do turno
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Rota" } }
+  /rota:
+    post:
+      tags: [Rotas]
+      summary: Cadastra rota (invalida cache e publica moove.rota.alterada)
+      description: "Permissão: USUARIO_GERENCIAR_ROTA"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RotaEntrada" }
+      responses:
+        "201":
+          description: Rota criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rota" }
+        "400": { $ref: "#/components/responses/RequisicaoInvalida" }
+  /rota/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Rotas]
+      summary: Detalha uma rota (cache-aside, chave moove:rotas:id:{id})
+      responses:
+        "200":
+          description: Rota
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rota" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+    put:
+      tags: [Rotas]
+      summary: Edita rota / reordena passageiros (invalida cache + evento)
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RotaEntrada" }
+      responses:
+        "200":
+          description: Rota editada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Rota" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+    delete:
+      tags: [Rotas]
+      summary: Exclui rota e libera os passageiros (invalida cache + evento)
+      responses:
+        "200": { description: Excluída }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+
+  # ------------------------------------------------------------------ EMPRESAS
+  /empresas:
+    get:
+      tags: [Empresas]
+      summary: Lista empresas (cache-aside, TTL 600 s)
+      security: []
+      responses:
+        "200":
+          description: Empresas
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Empresa" } }
+  /empresa:
+    post:
+      tags: [Empresas]
+      summary: Cadastra empresa com logo (multipart)
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [nome, cnpj]
+              properties:
+                nome: { type: string }
+                cnpj: { type: string, example: "11222333000181" }
+                logo: { type: string, format: binary }
+      responses:
+        "201":
+          description: Criada
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Empresa" }
+        "400": { $ref: "#/components/responses/RequisicaoInvalida" }
+  /empresa/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Id"
+    get:
+      tags: [Empresas]
+      summary: Mostra empresa (cache-aside)
+      responses:
+        "200":
+          description: Empresa
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Empresa" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+    put:
+      tags: [Empresas]
+      summary: Edita empresa (invalida empresas:* e rotas:*)
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                nome: { type: string }
+                cnpj: { type: string }
+                logo: { type: string, format: binary }
+      responses:
+        "200": { description: Editada }
+    delete:
+      tags: [Empresas]
+      summary: Exclui empresa
+      responses:
+        "200": { description: Excluída }
+  /empresa/completa/{id}:
+    get:
+      tags: [Empresas]
+      summary: Empresa com logo e passageiros
+      security: []
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: Empresa completa }
+  /empresa/funcionarios/{id}:
+    get:
+      tags: [Empresas]
+      summary: Empresa com passageiros (sem logo)
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: Empresa com passageiros }
+
+  # ------------------------------------------------------------------ MOTORISTAS
+  /motoristas:
+    get:
+      tags: [Motoristas]
+      summary: Lista motoristas (cache-aside, TTL 60 s)
+      responses:
+        "200":
+          description: Motoristas
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Motorista" } }
+  /motorista:
+    post:
+      tags: [Motoristas]
+      summary: Cadastra motorista (publica moove.motorista.alterado)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MotoristaEntrada" }
+      responses:
+        "201": { description: Criado }
+        "400": { $ref: "#/components/responses/RequisicaoInvalida" }
+  /motorista/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [Motoristas]
+      summary: Mostra motorista
+      responses:
+        "200":
+          description: Motorista
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Motorista" }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+    put:
+      tags: [Motoristas]
+      summary: Edita motorista
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MotoristaEntrada" }
+      responses:
+        "200": { description: Editado }
+    delete:
+      tags: [Motoristas]
+      summary: Exclui motorista
+      responses:
+        "200": { description: Excluído }
+  /motoristas/{id}/status:
+    patch:
+      tags: [Motoristas]
+      summary: Ativa ou inativa motorista
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ativo]
+              properties:
+                ativo: { type: boolean }
+      responses:
+        "200": { description: Status alterado }
+
+  # ------------------------------------------------------------------ PASSAGEIROS
+  /passageiros:
+    get:
+      tags: [Passageiros]
+      summary: Lista passageiros
+      responses:
+        "200":
+          description: Passageiros
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Passageiro" } }
+  /passageiro:
+    post:
+      tags: [Passageiros]
+      summary: Cadastra passageiro (invalida rotas:* + evento)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PassageiroEntrada" }
+      responses:
+        "201": { description: Criado }
+        "400": { $ref: "#/components/responses/RequisicaoInvalida" }
+  /passageiro/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [Passageiros]
+      summary: Mostra passageiro
+      responses:
+        "200":
+          description: Passageiro
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Passageiro" }
+    put:
+      tags: [Passageiros]
+      summary: Edita passageiro
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PassageiroEntrada" }
+      responses:
+        "200": { description: Editado }
+    delete:
+      tags: [Passageiros]
+      summary: Exclui passageiro
+      responses:
+        "200": { description: Excluído }
+
+  # ------------------------------------------------------------------ USUÁRIOS
+  /usuarios:
+    get:
+      tags: [Usuários]
+      summary: Lista usuários
+      responses:
+        "200":
+          description: Usuários
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Usuario" } }
+  /usuario:
+    post:
+      tags: [Usuários]
+      summary: Cadastra usuário (permissão USUARIO_CRIAR_USUARIO)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [nome, email, senha, cpf]
+              properties:
+                nome: { type: string }
+                email: { type: string, format: email }
+                senha: { type: string, format: password }
+                cpf: { type: string }
+                telefoneWhatsApp: { type: string }
+                papeis: { type: array, items: { type: string, enum: [ADMIN, USER] } }
+      responses:
+        "201": { description: Criado }
+  /usuario/{id}:
+    parameters: [{ $ref: "#/components/parameters/Id" }]
+    get:
+      tags: [Usuários]
+      summary: Mostra usuário
+      responses:
+        "200": { description: Usuário }
+    put:
+      tags: [Usuários]
+      summary: Edita usuário
+      responses:
+        "200": { description: Editado }
+    delete:
+      tags: [Usuários]
+      summary: Exclui usuário
+      responses:
+        "200": { description: Excluído }
+
+  # ------------------------------------------------------------------ ESCALA (WHATSAPP)
+  /whatsapp/escala:
+    get:
+      tags: [Escala (WhatsApp)]
+      summary: Fila de joinhas categorizada (plantão, rota, apoio, backup)
+      description: A data informada é o dia de execução da tarde; a lista de origem é a do dia anterior.
+      parameters:
+        - in: query
+          name: data
+          required: true
+          schema: { type: string, format: date, example: "2026-11-21" }
+      responses:
+        "200":
+          description: Escala
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Escala" }
+        "400": { $ref: "#/components/responses/RequisicaoInvalida" }
+        "503": { $ref: "#/components/responses/BotIndisponivel" }
+  /whatsapp/rotas-tarde:
+    get:
+      tags: [Escala (WhatsApp)]
+      summary: Rotas da tarde com motorista efetivo e checks de solicitação
+      parameters:
+        - { in: query, name: data, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Rotas do turno
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RotasDoTurno" }
+  /whatsapp/rotas-madrugada:
+    get:
+      tags: [Escala (WhatsApp)]
+      summary: Rotas da madrugada (execução em X+2)
+      parameters:
+        - { in: query, name: data, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Rotas do turno
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RotasDoTurno" }
+  /whatsapp/gerar-escala:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Gera a escala e publica no grupo (evento moove.escala.gerada)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dataExecucao: { type: string, example: "22/11/2026", description: "DD/MM/AAAA; padrão = amanhã" }
+      responses:
+        "200": { description: Escala processada }
+        "404": { $ref: "#/components/responses/NaoEncontrado" }
+  /whatsapp/escala/refazer:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Recalcula a escala de um dia (evento moove.escala.gerada)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [dia]
+              properties:
+                dia: { type: integer, minimum: 1, maximum: 31 }
+                enviarWhats: { type: boolean, default: false }
+      responses:
+        "200": { description: Escala atualizada }
+  /whatsapp/escala/inserir:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Insere motorista em uma posição da fila
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [whatsappId, listaId, posicaoAlvo]
+              properties:
+                whatsappId: { type: string }
+                listaId: { type: integer }
+                posicaoAlvo: { type: integer }
+      responses:
+        "200": { description: Inserido }
+  /whatsapp/escala/mover:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Move motorista na fila (setas ▲ ▼)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                whatsappId: { type: string }
+                listaId: { type: integer }
+                novaPosicaoAlvo: { type: integer }
+      responses:
+        "200": { description: Reordenado }
+  /whatsapp/escala/remover:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Remove motorista da fila
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                whatsappId: { type: string }
+                listaId: { type: integer }
+      responses:
+        "200": { description: Removido }
+  /whatsapp/escala/rota-manual:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Vincula (ou libera, com whatsappId vazio) um motorista numa rota
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [listaId, rotaId]
+              properties:
+                whatsappId: { type: string, description: "Vazio = libera a vaga" }
+                listaId: { type: integer }
+                rotaId: { type: integer }
+      responses:
+        "200": { description: Alocado / liberado }
+        "400": { description: Motorista configurado como SÓ PLANTÃO }
+  /whatsapp/configurar-dia:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Define dia livre/comum (feriados)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data, tipo]
+              properties:
+                data: { type: string, example: "25/12/2026", description: "DD/MM/AAAA ou 'hoje'" }
+                tipo: { $ref: "#/components/schemas/TipoDia" }
+      responses:
+        "200": { description: Calendário atualizado }
+  /whatsapp/comunicado:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Envia comunicado livre ao grupo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mensagem]
+              properties:
+                mensagem: { type: string }
+      responses:
+        "200": { description: Enviado }
+  /whatsapp/status-cadastro:
+    post:
+      tags: [Escala (WhatsApp)]
+      summary: Abre/fecha a janela de @cadastrar no grupo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                aberto: { type: boolean }
+      responses:
+        "200": { description: Status alterado }
+
+  # ------------------------------------------------------------------ ATRIBUIÇÃO
+  /atribuicao/gerar:
+    post:
+      tags: [Atribuição]
+      summary: Cruza fila × rotas para um turno
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                turno: { $ref: "#/components/schemas/TurnoRota" }
+      responses:
+        "201": { description: Atribuições geradas }
+  /atribuicao/dia/{turno}:
+    get:
+      tags: [Atribuição]
+      summary: Atribuições do dia para o turno
+      parameters:
+        - in: path
+          name: turno
+          required: true
+          schema: { $ref: "#/components/schemas/TurnoRota" }
+      responses:
+        "200": { description: Lista de atribuições }
+  /atribuicao/{id}:
+    delete:
+      tags: [Atribuição]
+      summary: Remove uma atribuição
+      parameters: [{ $ref: "#/components/parameters/Id" }]
+      responses:
+        "200": { description: Removida }
+
+  # ------------------------------------------------------------------ ENDEREÇAMENTO
+  /bairros:
+    get:
+      tags: [Endereçamento]
+      summary: Lista bairros
+      responses:
+        "200": { description: Bairros }
+  /cidades:
+    get:
+      tags: [Endereçamento]
+      summary: Lista cidades
+      responses:
+        "200": { description: Cidades }
+  /estados:
+    get:
+      tags: [Endereçamento]
+      summary: Lista estados
+      responses:
+        "200": { description: Estados }
+  /paises:
+    get:
+      tags: [Endereçamento]
+      summary: Lista países
+      responses:
+        "200": { description: Países }
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer, minimum: 1 }
+
+  responses:
+    RequisicaoInvalida:
+      description: Dados inválidos (campos obrigatórios, CPF/CNPJ inválido, duplicidade)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erro" }
+    NaoAutorizado:
+      description: Token ausente/inválido ou credenciais incorretas
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erro" }
+    Proibido:
+      description: Sem permissão (RBAC) ou navegação direta bloqueada pelo Nginx
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erro" }
+    NaoEncontrado:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erro" }
+    BotIndisponivel:
+      description: Bot do WhatsApp offline ou inicializando
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: "O serviço de WhatsApp está offline ou inicializando." }
+
+  schemas:
+    Erro:
+      type: object
+      properties:
+        message: { type: string, example: "Rota não encontrada no sistema!" }
+        idRequisicao: { type: string, format: uuid }
+    Saude:
+      type: object
+      properties:
+        status: { type: string, enum: [UP, DEGRADED, DOWN] }
+        dependencias:
+          type: object
+          properties:
+            mysql: { type: string, enum: [UP, DOWN] }
+            redis: { type: string, enum: [UP, DOWN, DESABILITADO] }
+            whatsapp: { type: string, enum: [UP, DESCONECTADO] }
+        verificadoEm: { type: string, format: date-time }
+    TurnoRota:
+      type: string
+      enum: [ROTA_TARDE, ROTA_MADRUGADA]
+    TipoDia:
+      type: string
+      enum: [DIA_COMUM, DIA_LIVRE]
+    Endereco:
+      type: object
+      properties:
+        id: { type: integer }
+        nome: { type: string, description: Logradouro }
+        numero: { type: integer }
+        bairro:
+          type: object
+          properties:
+            id: { type: integer }
+            nome: { type: string }
+    Empresa:
+      type: object
+      properties:
+        id: { type: integer }
+        nome: { type: string }
+        cnpj: { type: string }
+        logo: { type: string, nullable: true }
+        icone: { type: string, nullable: true }
+    Motorista:
+      type: object
+      properties:
+        id: { type: integer }
+        nome: { type: string }
+        telefoneWhatsApp: { type: string }
+        whatsAppLid: { type: string }
+        ativo: { type: boolean }
+        podeFazerRota: { type: boolean, description: "false = só plantão" }
+    MotoristaEntrada:
+      type: object
+      required: [nome, telefoneWhatsApp]
+      properties:
+        nome: { type: string }
+        telefoneWhatsApp: { type: string, example: "5544999990000" }
+        whatsAppLid: { type: string }
+        ativo: { type: boolean }
+        podeFazerRota: { type: boolean }
+    Passageiro:
+      type: object
+      properties:
+        id: { type: integer }
+        nome: { type: string }
+        telefoneWhatsApp: { type: string }
+        whatsAppLid: { type: string }
+        ativo: { type: boolean }
+        ordem_na_rota: { type: integer, nullable: true }
+        endereco: { $ref: "#/components/schemas/Endereco" }
+        empresa: { $ref: "#/components/schemas/Empresa" }
+    PassageiroEntrada:
+      type: object
+      required: [nome, endereco, empresa]
+      properties:
+        nome: { type: string }
+        telefoneWhatsApp: { type: string }
+        endereco:
+          type: object
+          properties:
+            nome: { type: string }
+            numero: { type: integer }
+            bairro: { type: object, properties: { nome: { type: string } } }
+        empresa: { type: object, properties: { id: { type: integer } } }
+    Rota:
+      type: object
+      properties:
+        id: { type: integer }
+        nome: { type: string, example: "Centro / Zona 7" }
+        ordem: { type: string, example: "ROTA 3" }
+        tipo_rota: { $ref: "#/components/schemas/TurnoRota" }
+        horario: { type: string, example: "18h00" }
+        empresas: { type: array, items: { $ref: "#/components/schemas/Empresa" } }
+        passageiros: { type: array, items: { $ref: "#/components/schemas/Passageiro" } }
+    RotaEntrada:
+      type: object
+      required: [nome, ordem, tipo_rota, horario]
+      properties:
+        nome: { type: string }
+        ordem: { type: string }
+        tipo_rota: { $ref: "#/components/schemas/TurnoRota" }
+        horario: { type: string }
+        empresaId: { type: integer }
+        passageirosIds:
+          type: array
+          items: { type: integer }
+          description: A ordem do array define ordem_na_rota (1..N)
+    Usuario:
+      type: object
+      properties:
+        id: { type: integer }
+        nome: { type: string }
+        email: { type: string }
+        cpf: { type: string }
+        papeis:
+          type: array
+          items:
+            type: object
+            properties:
+              nome: { type: string, enum: [ADMIN, USER] }
+    ItemEscala:
+      type: object
+      properties:
+        id: { type: integer }
+        posicao: { type: integer }
+        categoria: { type: string, enum: [PLANTAO, ROTA, APOIO, BACKUP, LIVRE] }
+        isApoioManual: { type: boolean }
+        motorista:
+          type: object
+          properties:
+            nome: { type: string }
+            podeFazerRota: { type: boolean }
+        whatsAppLid: { type: string }
+    Escala:
+      type: object
+      properties:
+        tipoDia: { $ref: "#/components/schemas/TipoDia" }
+        ehSegundaFeira: { type: boolean }
+        limitePlantao: { type: integer, example: 4 }
+        dataExibicaoTexto: { type: string, example: "21/11" }
+        listaId: { type: integer }
+        dados: { type: array, items: { $ref: "#/components/schemas/ItemEscala" } }
+    RotasDoTurno:
+      type: object
+      properties:
+        dataExibicaoTexto: { type: string }
+        dados:
+          type: array
+          items:
+            type: object
+            properties:
+              id_rota: { type: integer }
+              nomeRota: { type: string }
+              ordem: { type: string }
+              horario: { type: string }
+              tipo: { type: string, enum: [ROTA, APOIO, PLANTAO] }
+              motorista:
+                type: object
+                nullable: true
+                properties:
+                  id: { type: integer }
+                  nome: { type: string }
+                  posicaoJoinha: { type: integer }
+              passageiros:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id_passageiro: { type: integer }
+                    nome: { type: string }
+                    ordem_na_rota: { type: integer }
+                    solicitado: { type: boolean, description: "Confirmou a corrida (check verde)" }
+                    bairro: { type: string }
+                    logradouro: { type: string }
+                    numero: { type: integer }

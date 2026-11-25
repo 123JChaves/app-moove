@@ -4,3 +4,9 @@
 
 #Exclui as bibliotecas do commit
 node_modules
+
+# Artefatos de deploy
+.versao-*
+backups/
+diagnostico.txt
+scripts/_nao-usar-*
