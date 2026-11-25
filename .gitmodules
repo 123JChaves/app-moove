@@ -1,0 +1,6 @@
+[submodule "jcha_app"]
+	path = jcha_app
+	url = https://github.com/123JChaves/jcha_app.git
+[submodule "whatsappBot"]
+	path = whatsappBot
+	url = https://github.com/123JChaves/whatsappBot.git
