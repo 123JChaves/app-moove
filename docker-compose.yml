@@ -8,16 +8,43 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
+    # 🌟 CORREÇÃO 1: Alterado de 'ports' para 'expose' para bloquear o acesso externo direto da internet ao banco
+    expose:
+      - "3306"
+    # Acesso pelo DBeaver/Workbench SOMENTE deste computador (127.0.0.1), na porta 3307
+    # para não conflitar com o MySQL do XAMPP (3306). Não fica acessível pela rede nem pelo ngrok.
     ports:
-      - "3307:3306"
+      - "127.0.0.1:${MYSQL_PORTA_LOCAL:-3307}:3306"
     volumes:
       - db_data:/var/lib/mysql
     networks:
       - app_network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p$${MYSQL_ROOT_PASSWORD}"]
+      # 🌟 CORREÇÃO 2: Sintaxe ajustada para usar aspas simples nas variáveis internas do comando sh/bash do contêiner
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p'$$MYSQL_ROOT_PASSWORD'"]
       interval: 10s
       timeout: 5s
+      retries: 5
+
+  # ⚡ CONTAINER 1.1: Redis (cache distribuído + mensageria Pub/Sub)
+  redis:
+    image: redis:7-alpine
+    container_name: jcha_redis
+    restart: unless-stopped
+    # Cache puro: sem persistência em disco, limite de memória e descarte LRU das chaves menos usadas
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    expose:
+      - "6379"
+    # Acesso SOMENTE deste computador: permite usar este Redis quando o back-end/auditoria
+    # rodam fora do Docker (modo local, "npm run local:redis")
+    ports:
+      - "127.0.0.1:${REDIS_PORTA_LOCAL:-6379}:6379"
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
       retries: 5
 
   # 🤖 CONTAINER 2: Back-end (Sua API Bot WhatsApp)
@@ -30,8 +57,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8085:8085"
+      redis:
+        condition: service_healthy
+    # 🌟 CORREÇÃO: Alterado de ports para expose para impedir o acesso externo direto
+    expose:
+      - "8085"
     environment:
       DB_HOST: db
       DB_PORT: 3306
@@ -40,10 +70,90 @@ services:
       DB_NAME: ${MYSQL_DATABASE}
       JWT_SECRET: ${JWT_SECRET}
       PORT: 8085
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_ENABLED: "true"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_LOGGING: ${DB_LOGGING:-false}
+      CACHE_TTL_ROTAS: ${CACHE_TTL_ROTAS:-120}
+      CACHE_TTL_EMPRESAS: ${CACHE_TTL_EMPRESAS:-600}
+      CACHE_TTL_MOTORISTAS: ${CACHE_TTL_MOTORISTAS:-60}
+    # Liveness: o Docker marca o container como unhealthy se /health parar de responder
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8085/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
     volumes:
       - ./whatsappBot:/app
       - /app/node_modules
       - backend_uploads:/app/dist/public
+    networks:
+      - app_network
+
+  # 🧾 MICROSSERVIÇO DE AUDITORIA – banco PRÓPRIO (database-per-service)
+  db-auditoria:
+    image: mysql:8.0
+    container_name: moove_db_auditoria
+    restart: unless-stopped
+    command: ["--innodb-buffer-pool-size=64M", "--performance-schema=OFF"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AUDITORIA_DB_ROOT_PASSWORD:-auditoria_root_dev}
+      MYSQL_DATABASE: ${AUDITORIA_DB_NAME:-moove_auditoria}
+      MYSQL_USER: ${AUDITORIA_DB_USER:-auditoria}
+      MYSQL_PASSWORD: ${AUDITORIA_DB_PASSWORD:-auditoria_dev}
+    expose:
+      - "3306"
+    # Acesso pelo DBeaver SOMENTE deste computador, porta 3308
+    ports:
+      - "127.0.0.1:${AUDITORIA_DB_PORTA_LOCAL:-3308}:3306"
+    volumes:
+      - db_auditoria_data:/var/lib/mysql
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p'$$MYSQL_ROOT_PASSWORD'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 🧾 MICROSSERVIÇO DE AUDITORIA – consome eventos moove.* (Redis Pub/Sub) e expõe /auditoria
+  auditoria:
+    build:
+      context: ./auditoria
+      dockerfile: Dockerfile
+    image: moove-auditoria:local
+    container_name: moove_auditoria
+    restart: unless-stopped
+    # Independente do back-end: depende apenas do próprio banco e do barramento de eventos
+    depends_on:
+      db-auditoria:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "8090"
+    # 127.0.0.1 (e não "localhost"): no Alpine, "localhost" resolve primeiro para ::1 (IPv6)
+    # e o Node escuta em 0.0.0.0 (IPv4) -> o health check falharia mesmo com o serviço no ar.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8090/auditoria/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    environment:
+      PORT: 8090
+      JWT_SECRET: ${JWT_SECRET}
+      AUDITORIA_DB_HOST: db-auditoria
+      AUDITORIA_DB_PORT: 3306
+      AUDITORIA_DB_NAME: ${AUDITORIA_DB_NAME:-moove_auditoria}
+      AUDITORIA_DB_USER: ${AUDITORIA_DB_USER:-auditoria}
+      AUDITORIA_DB_PASSWORD: ${AUDITORIA_DB_PASSWORD:-auditoria_dev}
+      AUDITORIA_RETENCAO_DIAS: ${AUDITORIA_RETENCAO_DIAS:-180}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     networks:
       - app_network
 
@@ -78,7 +188,8 @@ services:
     env_file:
       - .env
     environment:
-      - REACT_NATIVE_PACKAGER_HOSTNAME=${REACT_NATIVE_PACKAGER_HOSTNAME}
+      # 🌟 CORREÇÃO: Removido o hífen (-) para manter a sintaxe correta de dicionário do YAML
+      REACT_NATIVE_PACKAGER_HOSTNAME: ${REACT_NATIVE_PACKAGER_HOSTNAME}
     stdin_open: true
     tty: true
     networks:
@@ -92,4 +203,5 @@ networks:
 
 volumes:
   db_data:
+  db_auditoria_data:
   backend_uploads:

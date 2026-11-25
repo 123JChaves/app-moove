@@ -1,0 +1,201 @@
+openapi: 3.0.3
+info:
+  title: Moove Auditoria API (microsserviço)
+  version: 1.0.0
+  description: |
+    Microsserviço que consome os eventos de domínio `moove.*` (Redis Pub/Sub) e mantém o histórico em banco próprio.
+
+    **Autenticação:** use o mesmo JWT do `POST /login` do back-end principal (`Authorization: Bearer <token>`).
+    **Correlation ID:** `X-Request-Id` é propagado pelo Nginx e devolvido nas respostas de erro.
+
+    **Evento assíncrono consumido** (não é HTTP): canal `moove.*`, corpo = `EnvelopeEvento`.
+servers:
+  - url: https://localhost
+    description: Via Nginx (prefixo /auditoria)
+  - url: http://localhost:8090
+    description: Serviço direto (desenvolvimento)
+tags:
+  - name: Operação
+  - name: Eventos
+  - name: DLQ
+security:
+  - bearerAuth: []
+paths:
+  /auditoria/health:
+    get:
+      tags: [Operação]
+      summary: Liveness
+      security: []
+      responses:
+        "200":
+          description: Processo ativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: UP }
+                  uptimeSegundos: { type: integer }
+  /auditoria/health/ready:
+    get:
+      tags: [Operação]
+      summary: Readiness (banco próprio é crítico; Redis deixa DEGRADED)
+      security: []
+      responses:
+        "200":
+          description: Pronto
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Saude" }
+        "503":
+          description: Banco de auditoria indisponível
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Saude" }
+  /auditoria/metrics:
+    get:
+      tags: [Operação]
+      summary: Métricas Prometheus (apenas rede interna)
+      security: []
+      responses:
+        "200":
+          description: Texto Prometheus
+          content:
+            text/plain:
+              example: |
+                auditoria_eventos_total{canal="moove.rota.alterada",resultado="registrado"} 12
+  /auditoria/eventos:
+    get:
+      tags: [Eventos]
+      summary: Lista eventos auditados (paginado, mais recentes primeiro)
+      parameters:
+        - { in: query, name: tipo, schema: { type: string, example: moove.escala.gerada } }
+        - { in: query, name: de, schema: { type: string, format: date-time, example: "2026-11-01" } }
+        - { in: query, name: ate, schema: { type: string, format: date-time, example: "2026-11-30" } }
+        - { in: query, name: pagina, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: tamanho, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        "200":
+          description: Página de eventos
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginaEventos" }
+        "400": { $ref: "#/components/responses/Erro400" }
+        "401": { $ref: "#/components/responses/Erro401" }
+  /auditoria/eventos/{id}:
+    get:
+      tags: [Eventos]
+      summary: Detalhe de um evento
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Evento
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventoAuditoria" }
+        "400": { $ref: "#/components/responses/Erro400" }
+        "401": { $ref: "#/components/responses/Erro401" }
+        "404":
+          description: Não encontrado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erro" }
+  /auditoria/resumo:
+    get:
+      tags: [Eventos]
+      summary: Total e último evento por tipo
+      parameters:
+        - { in: query, name: dias, schema: { type: integer, minimum: 1 }, description: "Janela em dias (omitir = todo o histórico)" }
+      responses:
+        "200":
+          description: Resumo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dias: { type: integer, nullable: true }
+                  porTipo:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tipo: { type: string }
+                        total: { type: integer }
+                        ultimoEm: { type: string, format: date-time, nullable: true }
+        "401": { $ref: "#/components/responses/Erro401" }
+  /auditoria/dlq/reprocessar:
+    post:
+      tags: [DLQ]
+      summary: Reprocessa a Dead Letter Queue agora
+      responses:
+        "200":
+          description: Resultado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reprocessados: { type: integer }
+                  pendentes: { type: integer }
+        "401": { $ref: "#/components/responses/Erro401" }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  responses:
+    Erro400:
+      description: Parâmetros inválidos
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erro" }
+    Erro401:
+      description: Token ausente, inválido ou expirado
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erro" }
+  schemas:
+    Erro:
+      type: object
+      properties:
+        message: { type: string }
+        idRequisicao: { type: string }
+    Saude:
+      type: object
+      properties:
+        status: { type: string, enum: [UP, DEGRADED, DOWN] }
+        dependencias:
+          type: object
+          properties:
+            mysqlAuditoria: { type: string, enum: [UP, DOWN] }
+            redis: { type: string, enum: [UP, DOWN] }
+        dlqPendentes: { type: integer, nullable: true }
+        verificadoEm: { type: string, format: date-time }
+    EnvelopeEvento:
+      description: Mensagem publicada pelo back-end no canal moove.* (consumida via Pub/Sub)
+      type: object
+      required: [id, tipo, ocorridoEm, origem, dados]
+      properties:
+        id: { type: string, format: uuid }
+        tipo:
+          type: string
+          enum: [moove.rota.alterada, moove.empresa.alterada, moove.motorista.alterado, moove.passageiro.alterado, moove.escala.gerada]
+        ocorridoEm: { type: string, format: date-time }
+        origem: { type: string, example: "moove-backend:42" }
+        dados: { type: object, example: { rotaId: 3, acao: EDITADA } }
+    EventoAuditoria:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tipo: { type: string }
+        origem: { type: string }
+        ocorridoEm: { type: string, format: date-time }
+        recebidoEm: { type: string, format: date-time }
+        dados: { type: object }
+    PaginaEventos:
+      type: object
+      properties:
+        itens: { type: array, items: { $ref: "#/components/schemas/EventoAuditoria" } }
+        pagina: { type: integer }
+        tamanho: { type: integer }
+        total: { type: integer }
